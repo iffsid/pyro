@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import functools
 import io
 import warnings
@@ -16,7 +19,7 @@ import pyro.poutine as poutine
 from pyro.infer import SVI, Trace_ELBO, TraceEnum_ELBO, TraceGraph_ELBO, Predictive
 from pyro.infer.autoguide import (AutoCallable, AutoDelta, AutoDiagonalNormal, AutoDiscreteParallel, AutoGuide,
                                   AutoGuideList, AutoIAFNormal, AutoLaplaceApproximation, AutoLowRankMultivariateNormal,
-                                  AutoMultivariateNormal, init_to_feasible, init_to_mean, init_to_median,
+                                  AutoNormal, AutoMultivariateNormal, init_to_feasible, init_to_mean, init_to_median,
                                   init_to_sample)
 from pyro.nn.module import PyroModule, PyroParam, PyroSample
 from pyro.optim import Adam
@@ -28,6 +31,7 @@ from tests.common import assert_close, assert_equal
 @pytest.mark.parametrize("auto_class", [
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoIAFNormal,
 ])
@@ -46,9 +50,10 @@ def test_scores(auto_class):
     model_trace.compute_log_prob()
 
     prefix = auto_class.__name__
-    assert '_{}_latent'.format(prefix) not in model_trace.nodes
+    if prefix != 'AutoNormal':
+        assert '_{}_latent'.format(prefix) not in model_trace.nodes
+        assert guide_trace.nodes['_{}_latent'.format(prefix)]['log_prob_sum'].item() != 0.0
     assert model_trace.nodes['z']['log_prob_sum'].item() != 0.0
-    assert guide_trace.nodes['_{}_latent'.format(prefix)]['log_prob_sum'].item() != 0.0
     assert guide_trace.nodes['z']['log_prob_sum'].item() == 0.0
 
 
@@ -57,6 +62,7 @@ def test_scores(auto_class):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoIAFNormal,
     AutoLaplaceApproximation,
@@ -93,10 +99,12 @@ def test_factor(auto_class, Elbo):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoIAFNormal,
     AutoLaplaceApproximation,
 ])
+@pytest.mark.filterwarnings("ignore::FutureWarning")
 def test_shapes(auto_class, init_loc_fn, Elbo):
 
     def model():
@@ -119,6 +127,7 @@ def test_shapes(auto_class, init_loc_fn, Elbo):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoIAFNormal,
     AutoLaplaceApproximation,
@@ -198,6 +207,7 @@ def nested_auto_guide_callable(model):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoLaplaceApproximation,
     auto_guide_list_x,
@@ -240,6 +250,7 @@ def test_median(auto_class, Elbo):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoLaplaceApproximation,
     auto_guide_list_x,
@@ -295,6 +306,7 @@ def test_autoguide_serialization(auto_class, Elbo):
 @pytest.mark.parametrize("auto_class", [
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoLaplaceApproximation,
 ])
@@ -343,6 +355,7 @@ def test_quantiles(auto_class, Elbo):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoIAFNormal,
     AutoLaplaceApproximation,
@@ -374,6 +387,7 @@ def test_discrete_parallel(continuous_class):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoIAFNormal,
     AutoLaplaceApproximation,
@@ -393,6 +407,7 @@ def test_guide_list(auto_class):
 @pytest.mark.parametrize("auto_class", [
     AutoDelta,
     AutoDiagonalNormal,
+    AutoNormal,
     AutoMultivariateNormal,
     AutoLowRankMultivariateNormal,
     AutoLaplaceApproximation,
@@ -418,6 +433,7 @@ def test_callable(auto_class):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoLaplaceApproximation,
 ])
@@ -591,6 +607,7 @@ def test_nested_autoguide(Elbo):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoLaplaceApproximation,
     functools.partial(AutoDiagonalNormal, init_loc_fn=init_to_mean),
@@ -628,6 +645,7 @@ def test_linear_regression_smoke(auto_class, Elbo):
     AutoDelta,
     AutoDiagonalNormal,
     AutoMultivariateNormal,
+    AutoNormal,
     AutoLowRankMultivariateNormal,
     AutoLaplaceApproximation,
     functools.partial(AutoDiagonalNormal, init_loc_fn=init_to_mean),
@@ -677,3 +695,86 @@ def test_predictive(auto_class):
     samples_deser = predictive_deser.call(x)
     # Note that the site values are different in the serialized guide
     assert len(samples) == len(samples_deser)
+
+
+@pytest.mark.parametrize("init_fn", [None, init_to_mean, init_to_median])
+@pytest.mark.parametrize("auto_class", [AutoDelta, AutoNormal, AutoGuideList])
+def test_subsample_guide(auto_class, init_fn):
+
+    # The model from tutorial/source/easyguide.ipynb
+    def model(batch, subsample, full_size):
+        num_time_steps = len(batch)
+        result = [None] * num_time_steps
+        drift = pyro.sample("drift", dist.LogNormal(-1, 0.5))
+        plate = pyro.plate("data", full_size, subsample=subsample)
+        assert plate.size == 50
+        with plate:
+            z = 0.
+            for t in range(num_time_steps):
+                z = pyro.sample("state_{}".format(t), dist.Normal(z, drift))
+                result[t] = pyro.sample("obs_{}".format(t), dist.Bernoulli(logits=z),
+                                        obs=batch[t])
+
+        return torch.stack(result)
+
+    def create_plates(batch, subsample, full_size):
+        return pyro.plate("data", full_size, subsample=subsample)
+
+    if auto_class == AutoGuideList:
+        guide = AutoGuideList(model, create_plates=create_plates)
+        guide.add(AutoDelta(poutine.block(model, expose=["drift"])))
+        guide.add(AutoNormal(poutine.block(model, hide=["drift"])))
+    else:
+        guide = auto_class(model, create_plates=create_plates)
+
+    full_size = 50
+    batch_size = 20
+    num_time_steps = 8
+    pyro.set_rng_seed(123456789)
+    data = model([None] * num_time_steps, torch.arange(full_size), full_size)
+    assert data.shape == (num_time_steps, full_size)
+
+    pyro.get_param_store().clear()
+    pyro.set_rng_seed(123456789)
+    svi = SVI(model, guide, Adam({"lr": 0.02}), Trace_ELBO())
+    for epoch in range(2):
+        beg = 0
+        while beg < full_size:
+            end = min(full_size, beg + batch_size)
+            subsample = torch.arange(beg, end)
+            batch = data[:, beg:end]
+            beg = end
+            svi.step(batch, subsample, full_size=full_size)
+
+
+@pytest.mark.parametrize("independent", [True, False], ids=["independent", "dependent"])
+@pytest.mark.parametrize("auto_class", [AutoDelta, AutoNormal])
+def test_subsample_guide_2(auto_class, independent):
+
+    # Simplified from Model2 in tutorial/source/forecasting_iii.ipynb
+    def model(data):
+        size, size = data.shape
+        origin_plate = pyro.plate("origin", size, dim=-2)
+        destin_plate = pyro.plate("destin", size, dim=-1)
+        with origin_plate, destin_plate:
+            batch = pyro.subsample(data, event_dim=0)
+            assert batch.size(0) == batch.size(1), batch.shape
+            pyro.sample("obs", dist.Normal(0, 1), obs=batch)
+
+    def create_plates(data):
+        size, size = data.shape
+        origin_plate = pyro.plate("origin", size, subsample_size=5, dim=-2)
+        if independent:
+            destin_plate = pyro.plate("destin", size, subsample_size=5, dim=-1)
+        else:
+            with origin_plate as subsample:
+                pass
+            destin_plate = pyro.plate("destin", size, subsample=subsample, dim=-1)
+        return origin_plate, destin_plate
+
+    guide = auto_class(model, create_plates=create_plates)
+    svi = SVI(model, guide, Adam({"lr": 0.01}), Trace_ELBO())
+
+    data = torch.randn(10, 10)
+    for step in range(2):
+        svi.step(data)

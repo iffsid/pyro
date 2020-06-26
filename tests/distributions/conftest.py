@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 
 import numpy as np
@@ -255,6 +258,11 @@ continuous_dists = [
                 {'stability': [1.5], 'skew': 0.1, 'test_data': [-10.]},
                 {'stability': [1.5], 'skew': 0.1, 'scale': 2.0, 'loc': -2.0, 'test_data': [10.]},
                 ]),
+    Fixture(pyro_dist=dist.MultivariateStudentT,
+            examples=[
+                {'df': 1.5, 'loc': [0.2, 0.3], 'scale_tril': [[0.8, 0.0], [1.3, 0.4]],
+                 'test_data': [-3., 2]},
+                ]),
 ]
 
 discrete_dists = [
@@ -319,6 +327,41 @@ discrete_dists = [
             min_samples=10000,
             is_discrete=True),
     Fixture(pyro_dist=dist.Binomial,
+            scipy_dist=sp.binom,
+            examples=[
+                {'probs': [0.6], 'total_count': 8,
+                 'test_data': [4.]},
+                {'probs': [0.3], 'total_count': 8,
+                 'test_data': [[2.], [4.]]},
+                {'probs': [[0.2], [0.4]], 'total_count': 8,
+                 'test_data': [[4.], [3.]]},
+                {'probs': [0.2, 0.4], 'total_count': [0., 0.],
+                 'test_data': [[0., 0.], [0., 0.]]},
+                {'probs': [0.2, 0.4], 'total_count': [[8., 7.], [5., 9.]],
+                 'test_data': [[6., 3.], [2., 8.]]},
+            ],
+            scipy_arg_fn=lambda probs, total_count: ((total_count, probs), {}),
+            prec=0.05,
+            min_samples=10000,
+            is_discrete=True),
+    Fixture(pyro_dist=dist.ExtendedBetaBinomial,
+            examples=[
+                {'concentration1': [2.], 'concentration0': [5.], 'total_count': 8,
+                 'test_data': [4.]},
+                {'concentration1': [2.], 'concentration0': [5.], 'total_count': 8,
+                 'test_data': [[2.], [4.]]},
+                {'concentration1': [[2.], [2.]], 'concentration0': [[5.], [5.]], 'total_count': 8,
+                 'test_data': [[4.], [3.]]},
+                {'concentration1': [2., 2.], 'concentration0': [5., 5.], 'total_count': [0., 0.],
+                 'test_data': [[0., 0.], [0., 0.]]},
+                {'concentration1': [2., 2.], 'concentration0': [5., 5.], 'total_count': [[8., 7.], [5., 9.]],
+                 'test_data': [[6., 3.], [2., 8.]]},
+            ],
+            batch_data_indices=[-1, -2],
+            prec=0.01,
+            min_samples=10000,
+            is_discrete=True),
+    Fixture(pyro_dist=dist.ExtendedBinomial,
             scipy_dist=sp.binom,
             examples=[
                 {'probs': [0.6], 'total_count': 8,
@@ -417,6 +460,23 @@ discrete_dists = [
                  'test_data': [[0.], [1.], [4.]]}
             ],
             scipy_arg_fn=lambda rate: ((np.array(rate),), {}),
+            prec=0.08,
+            is_discrete=True),
+    Fixture(pyro_dist=dist.Geometric,
+            scipy_dist=sp.geom,
+            examples=[
+                {'logits': [2.0],
+                 'test_data': [0.]},
+                {'logits': [3.0],
+                 'test_data': [1.]},
+                {'logits': [-6.0],
+                 'test_data': [4.]},
+                {'logits': [2.0, 3.0, -6.0],
+                 'test_data': [[0., 1., 4.], [0., 1., 4.]]},
+                {'logits': [[2.0], [3.0], [-6.0]],
+                 'test_data': [[0.], [1.], [4.]]}
+            ],
+            scipy_arg_fn=lambda probs: ((np.array(probs), -1), {}),
             prec=0.08,
             is_discrete=True),
 ]

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import functools
 import weakref
 
@@ -50,6 +53,12 @@ def _Multinomial_support(self):
     if isinstance(total_count, torch.Tensor):
         total_count = total_count.unsqueeze(-1)
     return torch.distributions.constraints.integer_interval(0, total_count)
+
+
+# This adds a __call__ method to satisfy sphinx.
+@patch_dependency('torch.distributions.utils.lazy_property.__call__')
+def _lazy_property__call__(self):
+    raise NotImplementedError
 
 
 __all__ = []

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 r"""
 Contributed Code
 ================
@@ -6,13 +9,15 @@ Contributed Code
     This code makes no guarantee about maintaining backwards compatibility.
 """
 
-from pyro.contrib import autoname, bnn, easyguide, gp, oed, tracking
+from pyro.contrib import autoname, bnn, easyguide, epidemiology, forecast, gp, oed, tracking
 
 __all__ = [
     "autoname",
     "bnn",
     "easyguide",
+    "epidemiology",
+    "forecast",
     "gp",
+    "oed",
     "tracking",
-    "oed"
 ]

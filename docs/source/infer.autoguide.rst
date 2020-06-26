@@ -27,6 +27,14 @@ AutoCallable
     :special-members: __call__
     :show-inheritance:
 
+AutoNormal
+----------
+.. autoclass:: pyro.infer.autoguide.AutoNormal
+    :members:
+    :undoc-members:
+    :special-members: __call__
+    :show-inheritance:
+
 AutoDelta
 ---------
 .. autoclass:: pyro.infer.autoguide.AutoDelta
@@ -66,6 +74,16 @@ AutoLowRankMultivariateNormal
     :undoc-members:
     :special-members: __call__
     :show-inheritance:
+
+
+AutoNormalizingFlow
+-------------------
+.. autoclass:: pyro.infer.autoguide.AutoNormalizingFlow
+    :members:
+    :undoc-members:
+    :special-members: __call__
+    :show-inheritance:
+
 
 AutoIAFNormal
 -----------------------------

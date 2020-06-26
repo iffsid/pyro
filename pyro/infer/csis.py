@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import itertools
 
 import torch
@@ -40,7 +43,7 @@ class CSIS(Importance):
                  num_inference_samples=10,
                  training_batch_size=10,
                  validation_batch_size=20):
-        super(CSIS, self).__init__(model, guide, num_inference_samples)
+        super().__init__(model, guide, num_inference_samples)
         self.model = model
         self.guide = guide
         self.optim = optim
@@ -108,7 +111,7 @@ class CSIS(Importance):
             if grads:
                 guide_params = set(site["value"].unconstrained()
                                    for site in particle_param_capture.trace.nodes.values())
-                guide_grads = torch.autograd.grad(particle_loss, guide_params)
+                guide_grads = torch.autograd.grad(particle_loss, guide_params, allow_unused=True)
                 for guide_grad, guide_param in zip(guide_grads, guide_params):
                     guide_param.grad = guide_grad if guide_param.grad is None else guide_param.grad + guide_grad
 

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import functools
 
 from pyro.params.param_store import _MODULE_NAMESPACE_DIVIDER, ParamStoreDict  # noqa: F401
@@ -9,7 +12,7 @@ _PYRO_STACK = []
 _PYRO_PARAM_STORE = ParamStoreDict()
 
 
-class _DimAllocator(object):
+class _DimAllocator:
     """
     Dimension allocator for internal use by :class:`plate`.
     There is a single global instance.
@@ -60,7 +63,7 @@ class _DimAllocator(object):
 _DIM_ALLOCATOR = _DimAllocator()
 
 
-class _EnumAllocator(object):
+class _EnumAllocator:
     """
     Dimension allocator for internal use by :func:`~pyro.poutine.markov`.
     There is a single global instance.
@@ -128,7 +131,7 @@ class NonlocalExit(Exception):
         :param site: message at a pyro site constructor.
             Just stores the input site.
         """
-        super(NonlocalExit, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
         self.site = site
 
     def reset_stack(self):
@@ -228,6 +231,7 @@ def effectful(fn=None, type=None):
     assert type is not None, "must provide a type label for operation {}".format(fn)
     assert type != "message", "cannot use 'message' as keyword"
 
+    @functools.wraps(fn)
     def _fn(*args, **kwargs):
 
         name = kwargs.pop("name", None)

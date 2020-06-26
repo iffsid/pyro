@@ -1,4 +1,8 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import argparse
+import bz2
 import csv
 import datetime
 import logging
@@ -10,7 +14,7 @@ import urllib
 
 import torch
 
-from pyro.contrib.examples.util import get_data_directory
+from pyro.contrib.examples.util import get_data_directory, _mkdir_p
 
 DATA = get_data_directory(__file__)
 
@@ -25,16 +29,9 @@ SOURCE_FILES = [
     "date-hour-soo-dest-2016.csv.gz",
     "date-hour-soo-dest-2017.csv.gz",
     "date-hour-soo-dest-2018.csv.gz",
+    "date-hour-soo-dest-2019.csv.gz",
 ]
 CACHE_URL = "https://d2hg8soec8ck9v.cloudfront.net/datasets/bart_full.pkl.bz2"
-
-
-def _mkdir_p(dirname):
-    if not os.path.exists(dirname):
-        try:
-            os.makedirs(dirname)
-        except FileExistsError:
-            pass
 
 
 def _load_hourly_od(basename):
@@ -43,7 +40,6 @@ def _load_hourly_od(basename):
         return filename
 
     # Download source files.
-    _mkdir_p(DATA)
     gz_filename = os.path.join(DATA, basename)
     if not os.path.exists(gz_filename):
         url = SOURCE_DIR + basename
@@ -92,13 +88,17 @@ def _load_hourly_od(basename):
 def load_bart_od():
     """
     Load a dataset of hourly origin-destination ridership counts for every pair
-    of BART stations during the years 2011-2018.
+    of BART stations during the years 2011-2019.
 
     **Source** https://www.bart.gov/about/reports/ridership
 
-    This downloads and preprocesses the dataset the first time it is called,
-    requiring about 300MB of file transfer and storing a few GB of temp files.
-    On subsequent calls this reads from a cached ``.pkl.bz2``.
+    This downloads the dataset the first time it is called. On subsequent calls
+    this reads from a local cached file ``.pkl.bz2``. This attempts to
+    download a preprocessed compressed cached file maintained by the Pyro team.
+    On cache hit this should be very fast. On cache miss this falls back to
+    downloading the original data source and preprocessing the dataset,
+    requiring about 350MB of file transfer, storing a few GB of temp files, and
+    taking upwards of 30 minutes.
 
     :returns: a dataset is a dictionary with fields:
 
@@ -107,6 +107,7 @@ def load_bart_od():
         -   "counts": a ``torch.FloatTensor`` of ridership counts, with shape
             ``(num_hours, len(stations), len(stations))``.
     """
+    _mkdir_p(DATA)
     filename = os.path.join(DATA, "bart_full.pkl.bz2")
     # Work around apparent bug in torch.load(),torch.save().
     pkl_file = filename.rsplit(".", 1)[0]
@@ -114,13 +115,14 @@ def load_bart_od():
         try:
             urllib.request.urlretrieve(CACHE_URL, filename)
             logging.debug("cache hit, uncompressing")
-            subprocess.check_call(["bunzip2", "-k", filename])
+            with bz2.BZ2File(filename) as src, open(filename[:-4], "wb") as dst:
+                dst.write(src.read())
         except urllib.error.HTTPError:
             logging.debug("cache miss, preprocessing from scratch")
     if os.path.exists(pkl_file):
         return torch.load(pkl_file)
 
-    filenames = multiprocessing.Pool().map(_load_hourly_od, SOURCE_FILES)
+    filenames = multiprocessing.Pool(len(SOURCE_FILES)).map(_load_hourly_od, SOURCE_FILES)
     datasets = list(map(torch.load, filenames))
 
     stations = sorted(set().union(*(d["stations"].keys() for d in datasets)))

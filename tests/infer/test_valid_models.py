@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import logging
 import warnings
 from collections import defaultdict
@@ -12,6 +15,7 @@ import pyro.poutine as poutine
 from pyro.distributions.testing import fakes
 from pyro.infer import (SVI, EnergyDistance, Trace_ELBO, TraceEnum_ELBO, TraceGraph_ELBO, TraceMeanField_ELBO,
                         TraceTailAdaptive_ELBO, config_enumerate)
+from pyro.infer.reparam import LatentStableReparam
 from pyro.infer.tracetmc_elbo import TraceTMC_ELBO
 from pyro.infer.util import torch_item
 from pyro.ops.indexing import Vindex
@@ -112,6 +116,27 @@ def test_nonempty_model_empty_guide_ok(Elbo, strict_enumeration_warning):
         assert_ok(model, guide, elbo)
 
 
+@pytest.mark.parametrize("Elbo", [
+    Trace_ELBO,
+    TraceGraph_ELBO,
+    TraceEnum_ELBO,
+    TraceTMC_ELBO,
+    EnergyDistance_prior,
+    EnergyDistance_noprior,
+])
+@pytest.mark.parametrize("strict_enumeration_warning", [True, False])
+def test_nonempty_model_empty_guide_error(Elbo, strict_enumeration_warning):
+
+    def model():
+        pyro.sample("x", dist.Normal(0, 1))
+
+    def guide():
+        pass
+
+    elbo = Elbo(strict_enumeration_warning=strict_enumeration_warning)
+    assert_error(model, guide, elbo)
+
+
 @pytest.mark.parametrize("Elbo", [Trace_ELBO, TraceGraph_ELBO, TraceEnum_ELBO, TraceTMC_ELBO])
 @pytest.mark.parametrize("strict_enumeration_warning", [True, False])
 def test_empty_model_empty_guide_ok(Elbo, strict_enumeration_warning):
@@ -191,6 +216,50 @@ def test_variable_clash_in_guide_error(Elbo):
         pyro.sample("x", dist.Bernoulli(p))  # Should error here.
 
     assert_error(model, guide, Elbo(), match='Multiple sample sites named')
+
+
+@pytest.mark.parametrize("has_rsample", [False, True])
+@pytest.mark.parametrize("Elbo", [Trace_ELBO, TraceGraph_ELBO, TraceEnum_ELBO, TraceTMC_ELBO])
+def test_set_has_rsample_ok(has_rsample, Elbo):
+
+    # This model has sparse gradients, so users may want to disable
+    # reparametrized sampling to reduce variance of gradient estimates.
+    # However both versions should be correct, i.e. with or without has_rsample.
+    def model():
+        z = pyro.sample("z", dist.Normal(0, 1))
+        loc = (z * 100).clamp(min=0, max=1)  # sparse gradients
+        pyro.sample("x", dist.Normal(loc, 1), obs=torch.tensor(0.))
+
+    def guide():
+        loc = pyro.param("loc", torch.tensor(0.))
+        pyro.sample("z", dist.Normal(loc, 1).has_rsample_(has_rsample))
+
+    if Elbo is TraceEnum_ELBO:
+        guide = config_enumerate(guide)
+    elif Elbo is TraceTMC_ELBO:
+        guide = config_enumerate(guide, num_samples=2)
+
+    assert_ok(model, guide, Elbo(strict_enumeration_warning=False))
+
+
+@pytest.mark.parametrize("Elbo", [Trace_ELBO, TraceGraph_ELBO, TraceEnum_ELBO, TraceTMC_ELBO])
+def test_not_has_rsample_ok(Elbo):
+
+    def model():
+        z = pyro.sample("z", dist.Normal(0, 1))
+        p = z.round().clamp(min=0.2, max=0.8)  # discontinuous
+        pyro.sample("x", dist.Bernoulli(p), obs=torch.tensor(0.))
+
+    def guide():
+        loc = pyro.param("loc", torch.tensor(0.))
+        pyro.sample("z", dist.Normal(loc, 1).has_rsample_(False))
+
+    if Elbo is TraceEnum_ELBO:
+        guide = config_enumerate(guide)
+    elif Elbo is TraceTMC_ELBO:
+        guide = config_enumerate(guide, num_samples=2)
+
+    assert_ok(model, guide, Elbo(strict_enumeration_warning=False))
 
 
 @pytest.mark.parametrize("subsample_size", [None, 2], ids=["full", "subsample"])
@@ -274,6 +343,33 @@ def test_plate_subsample_param_ok(subsample_size, Elbo):
             p0 = pyro.param("p0", torch.tensor(0.), event_dim=0)
             assert p0.shape == ()
             p = pyro.param("p", 0.5 * torch.ones(10), event_dim=0)
+            assert len(p) == len(ind)
+            pyro.sample("x", dist.Bernoulli(p))
+
+    if Elbo is TraceEnum_ELBO:
+        guide = config_enumerate(guide)
+    elif Elbo is TraceTMC_ELBO:
+        guide = config_enumerate(guide, num_samples=2)
+
+    assert_ok(model, guide, Elbo())
+
+
+@pytest.mark.parametrize("subsample_size", [None, 5], ids=["full", "subsample"])
+@pytest.mark.parametrize("Elbo", [Trace_ELBO, TraceGraph_ELBO, TraceEnum_ELBO, TraceTMC_ELBO])
+def test_plate_subsample_primitive_ok(subsample_size, Elbo):
+
+    def model():
+        p = torch.tensor(0.5)
+        with pyro.plate("plate", 10, subsample_size):
+            pyro.sample("x", dist.Bernoulli(p))
+
+    def guide():
+        with pyro.plate("plate", 10, subsample_size) as ind:
+            p0 = torch.tensor(0.)
+            p0 = pyro.subsample(p0, event_dim=0)
+            assert p0.shape == ()
+            p = 0.5 * torch.ones(10)
+            p = pyro.subsample(p, event_dim=0)
             assert len(p) == len(ind)
             pyro.sample("x", dist.Bernoulli(p))
 
@@ -2058,3 +2154,21 @@ def test_no_log_prob_ok(Elbo):
 
     data = torch.randn(10)
     assert_ok(model, guide, Elbo(), data=data)
+
+
+def test_reparam_stable():
+
+    @poutine.reparam(config={"z": LatentStableReparam()})
+    def model():
+        stability = pyro.sample("stability", dist.Uniform(0., 2.))
+        skew = pyro.sample("skew", dist.Uniform(-1., 1.))
+        y = pyro.sample("z", dist.Stable(stability, skew))
+        pyro.sample("x", dist.Poisson(y.abs()), obs=torch.tensor(1.))
+
+    def guide():
+        pyro.sample("stability", dist.Delta(torch.tensor(1.5)))
+        pyro.sample("skew", dist.Delta(torch.tensor(0.)))
+        pyro.sample("z_uniform", dist.Delta(torch.tensor(0.1)))
+        pyro.sample("z_exponential", dist.Delta(torch.tensor(1.)))
+
+    assert_ok(model, guide, Trace_ELBO())

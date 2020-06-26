@@ -26,7 +26,7 @@ make format            # runs isort
 make test              # linting and unit tests
 ```
 
-If you've modified core pyro code, examples, or tutorials, you can run more comprehensive tests locally
+If you've modified core pyro code, examples, or tutorials, you can run more comprehensive tests locally (after first adding any new files to the appropriate `tests/` script)
 ```sh
 make test-examples     # test examples/
 make integration-test  # longer-running tests (may take hours)
@@ -102,17 +102,21 @@ To get more details on the potential sources of slowdown, use the `cProfile` too
 
 ```sh
 python -m profiler.distributions --dist bernoulli --tool cprofile
-
 ```
 
 # Submitting
 
 For larger changes, please open an issue for discussion before submitting a pull request.
+For relevant design questions to consider, see past
+[design documents](https://github.com/pyro-ppl/pyro/wiki/Design-Docs).
+
 In your PR, please include:
 - Changes made
 - Links to related issues/PRs
 - Tests
 - Dependencies
+
+If you add new files, please run `make license` to automatically add copyright headers.
 
 For speculative changes meant for early-stage review, include `[WIP]` in the PR's title. 
 (One of the maintainers will add the `WIP` tag.)

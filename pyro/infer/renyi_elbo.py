@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 import warnings
 
@@ -6,7 +9,7 @@ import torch
 from pyro.distributions.util import is_identically_zero
 from pyro.infer.elbo import ELBO
 from pyro.infer.enum import get_importance_trace
-from pyro.infer.util import is_validation_enabled, torch_item
+from pyro.infer.util import get_dependent_plate_dims, is_validation_enabled, torch_sum
 from pyro.util import check_if_enumerated, warn_if_nan
 
 
@@ -62,22 +65,23 @@ class RenyiELBO(ELBO):
             raise ValueError("The order alpha should not be equal to 1. Please use Trace_ELBO class"
                              "for the case alpha = 1.")
         self.alpha = alpha
-        super(RenyiELBO, self).__init__(num_particles=num_particles,
-                                        max_plate_nesting=max_plate_nesting,
-                                        vectorize_particles=vectorize_particles,
-                                        strict_enumeration_warning=strict_enumeration_warning)
+        super().__init__(num_particles=num_particles,
+                         max_plate_nesting=max_plate_nesting,
+                         vectorize_particles=vectorize_particles,
+                         strict_enumeration_warning=strict_enumeration_warning)
 
-    def _get_trace(self, model, guide, *args, **kwargs):
+    def _get_trace(self, model, guide, args, kwargs):
         """
         Returns a single trace from the guide, and the model that is run
         against it.
         """
         model_trace, guide_trace = get_importance_trace(
-            "flat", self.max_plate_nesting, model, guide, *args, **kwargs)
+            "flat", self.max_plate_nesting, model, guide, args, kwargs)
         if is_validation_enabled():
             check_if_enumerated(guide_trace)
         return model_trace, guide_trace
 
+    @torch.no_grad()
     def loss(self, model, guide, *args, **kwargs):
         """
         :returns: returns an estimate of the ELBO
@@ -89,27 +93,20 @@ class RenyiELBO(ELBO):
         is_vectorized = self.vectorize_particles and self.num_particles > 1
 
         # grab a vectorized trace from the generator
-        for model_trace, guide_trace in self._get_traces(model, guide, *args, **kwargs):
+        for model_trace, guide_trace in self._get_traces(model, guide, args, kwargs):
             elbo_particle = 0.
+            sum_dims = get_dependent_plate_dims(model_trace.nodes.values())
 
             # compute elbo
             for name, site in model_trace.nodes.items():
                 if site["type"] == "sample":
-                    if is_vectorized:
-                        log_prob_sum = site["log_prob"].detach().reshape(self.num_particles, -1).sum(-1)
-                    else:
-                        log_prob_sum = torch_item(site["log_prob_sum"])
-
+                    log_prob_sum = torch_sum(site["log_prob"], sum_dims)
                     elbo_particle = elbo_particle + log_prob_sum
 
             for name, site in guide_trace.nodes.items():
                 if site["type"] == "sample":
                     log_prob, score_function_term, entropy_term = site["score_parts"]
-                    if is_vectorized:
-                        log_prob_sum = log_prob.detach().reshape(self.num_particles, -1).sum(-1)
-                    else:
-                        log_prob_sum = torch_item(site["log_prob_sum"])
-
+                    log_prob_sum = torch_sum(site["log_prob"], sum_dims)
                     elbo_particle = elbo_particle - log_prob_sum
 
             elbo_particles.append(elbo_particle)
@@ -117,7 +114,7 @@ class RenyiELBO(ELBO):
         if is_vectorized:
             elbo_particles = elbo_particles[0]
         else:
-            elbo_particles = torch.tensor(elbo_particles)  # no need to use .new*() here
+            elbo_particles = torch.stack(elbo_particles)
 
         log_weights = (1. - self.alpha) * elbo_particles
         log_mean_weight = torch.logsumexp(log_weights, dim=0) - math.log(self.num_particles)
@@ -141,27 +138,22 @@ class RenyiELBO(ELBO):
         tensor_holder = None
 
         # grab a vectorized trace from the generator
-        for model_trace, guide_trace in self._get_traces(model, guide, *args, **kwargs):
+        for model_trace, guide_trace in self._get_traces(model, guide, args, kwargs):
             elbo_particle = 0
             surrogate_elbo_particle = 0
+            sum_dims = get_dependent_plate_dims(model_trace.nodes.values())
 
             # compute elbo and surrogate elbo
             for name, site in model_trace.nodes.items():
                 if site["type"] == "sample":
-                    if is_vectorized:
-                        log_prob_sum = site["log_prob"].reshape(self.num_particles, -1).sum(-1)
-                    else:
-                        log_prob_sum = site["log_prob_sum"]
+                    log_prob_sum = torch_sum(site["log_prob"], sum_dims)
                     elbo_particle = elbo_particle + log_prob_sum.detach()
                     surrogate_elbo_particle = surrogate_elbo_particle + log_prob_sum
 
             for name, site in guide_trace.nodes.items():
                 if site["type"] == "sample":
                     log_prob, score_function_term, entropy_term = site["score_parts"]
-                    if is_vectorized:
-                        log_prob_sum = log_prob.reshape(self.num_particles, -1).sum(-1)
-                    else:
-                        log_prob_sum = site["log_prob_sum"]
+                    log_prob_sum = torch_sum(site["log_prob"], sum_dims)
 
                     elbo_particle = elbo_particle - log_prob_sum.detach()
 
@@ -169,7 +161,7 @@ class RenyiELBO(ELBO):
                         surrogate_elbo_particle = surrogate_elbo_particle - log_prob_sum
 
                         if not is_identically_zero(score_function_term):
-                            # link to the issue: https://github.com/uber/pyro/issues/1222
+                            # link to the issue: https://github.com/pyro-ppl/pyro/issues/1222
                             raise NotImplementedError
 
                     if not is_identically_zero(score_function_term):
@@ -202,7 +194,7 @@ class RenyiELBO(ELBO):
             surrogate_elbo_particles = torch.stack(surrogate_elbo_particles)
 
         log_weights = (1. - self.alpha) * elbo_particles
-        log_mean_weight = torch.logsumexp(log_weights, dim=0) - math.log(self.num_particles)
+        log_mean_weight = torch.logsumexp(log_weights, dim=0, keepdim=True) - math.log(self.num_particles)
         elbo = log_mean_weight.sum().item() / (1. - self.alpha)
 
         # collect parameters to train from model and guide
@@ -215,7 +207,6 @@ class RenyiELBO(ELBO):
             surrogate_elbo = (normalized_weights * surrogate_elbo_particles).sum() / self.num_particles
             surrogate_loss = -surrogate_elbo
             surrogate_loss.backward()
-
         loss = -elbo
         warn_if_nan(loss, "loss")
         return loss

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import contextlib
 import numbers
 import os
@@ -26,6 +29,7 @@ EXAMPLES_DIR = os.path.join(os.path.dirname(TESTS_DIR), 'examples')
 
 
 def xfail_param(*args, **kwargs):
+    kwargs.setdefault("reason", "unknown")
     return pytest.param(*args, marks=[pytest.mark.xfail(**kwargs)])
 
 

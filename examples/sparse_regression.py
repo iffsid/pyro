@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import argparse
 
 import numpy as np
@@ -93,6 +96,8 @@ as for quadratic coefficients theta_ij for a given (in our case MAP) estimate of
 hyperparameters (eta1, xisq, ...).
 Compare to theorem 5.1 in reference [1].
 """
+
+
 @torch.no_grad()
 def compute_posterior_stats(X, Y, msq, lam, eta1, xisq, c, var_obs, jitter=1.0e-4):
     N, P = X.shape
@@ -309,7 +314,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    assert pyro.__version__.startswith('1.0.0')
+    assert pyro.__version__.startswith('1.3.1')
     parser = argparse.ArgumentParser(description='Krylov KIT')
     parser.add_argument('--num-data', type=int, default=750)
     parser.add_argument('--num-steps', type=int, default=1000)

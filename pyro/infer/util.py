@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 import numbers
 from collections import Counter, defaultdict
@@ -63,6 +66,16 @@ def torch_exp(x):
         return math.exp(x)
 
 
+def torch_sum(tensor, dims):
+    """
+    Like :func:`torch.sum` but sum out dims only if they exist.
+    """
+    assert all(d < 0 for d in dims)
+    leftmost = -tensor.dim()
+    dims = [d for d in dims if leftmost <= d]
+    return tensor.sum(dims) if dims else tensor
+
+
 def detach_iterable(iterable):
     if torch.is_tensor(iterable):
         return iterable.detach()
@@ -91,6 +104,19 @@ def get_plate_stacks(trace):
             if node["type"] == "sample" and not site_is_subsample(node)}
 
 
+def get_dependent_plate_dims(sites):
+    """
+    Return a list of dims for plates that are not common to all sites.
+    """
+    plate_sets = [site["cond_indep_stack"]
+                  for site in sites if site["type"] == "sample"]
+    all_plates = set().union(*plate_sets)
+    common_plates = all_plates.intersection(*plate_sets)
+    sum_plates = all_plates - common_plates
+    sum_dims = list(sorted(f.dim for f in sum_plates))
+    return sum_dims
+
+
 class MultiFrameTensor(dict):
     """
     A container for sums of Tensors among different :class:`plate` contexts.
@@ -107,7 +133,7 @@ class MultiFrameTensor(dict):
         summed = downstream_cost.sum_to(target_site["cond_indep_stack"])
     """
     def __init__(self, *items):
-        super(MultiFrameTensor, self).__init__()
+        super().__init__()
         self.add(*items)
 
     def add(self, *items):
@@ -165,7 +191,7 @@ def compute_site_dice_factor(site):
     return log_prob, log_denom
 
 
-class Dice(object):
+class Dice:
     """
     An implementation of the DiCE operator compatible with Pyro features.
 
@@ -277,8 +303,8 @@ class Dice(object):
                     if torch._C._get_tracing_state() or not mask.all():
                         mask._pyro_dims = prob._pyro_dims
                         cost, prob, mask = packed.broadcast_all(cost, prob, mask)
-                        prob = prob[mask]
-                        cost = cost[mask]
+                        prob = prob.masked_select(mask)
+                        cost = cost.masked_select(mask)
                     else:
                         cost, prob = packed.broadcast_all(cost, prob)
                     expected_cost = expected_cost + scale * torch.tensordot(prob, cost, prob.dim())

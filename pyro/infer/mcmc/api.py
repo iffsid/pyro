@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 This module offers a modified interface for MCMC inference with the following objectives:
   - making MCMC independent of Pyro specific trace data structure, to facilitate
@@ -19,11 +22,12 @@ import torch
 import torch.multiprocessing as mp
 
 import pyro
-from pyro.infer.mcmc.hmc import HMC
-from pyro.infer.mcmc.nuts import NUTS
-from pyro.infer.mcmc.logger import initialize_logger, DIAGNOSTIC_MSG, TqdmHandler, ProgressBar
-from pyro.infer.mcmc.util import diagnostics, initialize_model, print_summary
 import pyro.poutine as poutine
+from pyro.infer.mcmc.hmc import HMC
+from pyro.infer.mcmc.logger import DIAGNOSTIC_MSG, ProgressBar, TqdmHandler, initialize_logger
+from pyro.infer.mcmc.nuts import NUTS
+from pyro.infer.mcmc.util import diagnostics, initialize_model, print_summary
+from pyro.util import optional
 
 MAX_SEED = 2**32 - 1
 
@@ -62,7 +66,7 @@ def logger_thread(log_queue, warmup_steps, num_samples, num_chains, disable_prog
         progress_bars.close()
 
 
-class _Worker(object):
+class _Worker:
     def __init__(self, chain_id, result_queue, log_queue, event, kernel, num_samples,
                  warmup_steps, initial_params=None, hook=None):
         self.chain_id = chain_id
@@ -131,7 +135,7 @@ def _add_logging_hook(logger, progress_bar=None, hook=None):
     return _add_logging
 
 
-class _UnarySampler(object):
+class _UnarySampler:
     """
     Single process runner class optimized for the case chains are drawn sequentially.
     """
@@ -145,7 +149,7 @@ class _UnarySampler(object):
         self.logger = None
         self.disable_progbar = disable_progbar
         self.hook = hook
-        super(_UnarySampler, self).__init__()
+        super().__init__()
 
     def terminate(self, *args, **kwargs):
         pass
@@ -168,7 +172,7 @@ class _UnarySampler(object):
             progress_bar.close()
 
 
-class _MultiSampler(object):
+class _MultiSampler:
     """
     Parallel runner class for running MCMC chains in parallel. This uses the
     `torch.multiprocessing` module (itself a light wrapper over the python
@@ -249,7 +253,7 @@ class _MultiSampler(object):
             self.terminate(terminate_workers=exc_raised)
 
 
-class MCMC(object):
+class MCMC:
     """
     Wrapper class for Markov Chain Monte Carlo algorithms. Specific MCMC algorithms
     are TraceKernel instances and need to be supplied as a ``kernel`` argument
@@ -270,7 +274,7 @@ class MCMC(object):
         excluding the samples discarded during the warmup phase.
     :param int warmup_steps: Number of warmup iterations. The samples generated
         during the warmup phase are discarded. If not provided, default is
-        half of `num_samples`.
+        is the same as `num_samples`.
     :param int num_chains: Number of MCMC chains to run in parallel. Depending on
         whether `num_chains` is 1 or more than 1, this class internally dispatches
         to either `_UnarySampler` or `_MultiSampler`.
@@ -286,9 +290,10 @@ class MCMC(object):
         Only applicable for Python 3.5 and above. Use `mp_context="spawn"` for
         CUDA.
     :param bool disable_progbar: Disable progress bar and diagnostics update.
-    :param bool disable_validation: Disables distribution validation check. This is
-        disabled by default, since divergent transitions will lead to exceptions.
-        Switch to `True` for debugging purposes.
+    :param bool disable_validation: Disables distribution validation check.
+        Defaults to ``True``, disabling validation, since divergent transitions
+        will lead to exceptions. Switch to ``False`` to enable validation, or
+        to ``None`` to preserve existing global values.
     :param dict transforms: dictionary that specifies a transform for a sample site
         with constrained support to unconstrained space.
     """
@@ -347,10 +352,31 @@ class MCMC(object):
 
     @poutine.block
     def run(self, *args, **kwargs):
+        """
+        Run MCMC to generate samples and populate `self._samples`.
+
+        Example usage:
+
+        .. code-block:: python
+
+            def model(data):
+                ...
+
+            nuts_kernel = NUTS(model)
+            mcmc = MCMC(nuts_kernel, num_samples=500)
+            mcmc.run(data)
+            samples = mcmc.get_samples()
+
+        :param args: optional arguments taken by
+            :meth:`MCMCKernel.setup <pyro.infer.mcmc.mcmc_kernel.MCMCKernel.setup>`.
+        :param kwargs: optional keywords arguments taken by
+            :meth:`MCMCKernel.setup <pyro.infer.mcmc.mcmc_kernel.MCMCKernel.setup>`.
+        """
         self._args, self._kwargs = args, kwargs
         num_samples = [0] * self.num_chains
         z_flat_acc = [[] for _ in range(self.num_chains)]
-        with pyro.validation_enabled(not self.disable_validation):
+        with optional(pyro.validation_enabled(not self.disable_validation),
+                      self.disable_validation is not None):
             for x, chain_id in self.sampler.run(*args, **kwargs):
                 if num_samples[chain_id] == 0:
                     num_samples[chain_id] += 1
@@ -381,13 +407,21 @@ class MCMC(object):
 
         # If transforms is not explicitly provided, infer automatically using
         # model args, kwargs.
-        if self.transforms is None and isinstance(self.kernel, (HMC, NUTS)):
-            if self.kernel.transforms is not None:
+        if self.transforms is None:
+            # Try to initialize kernel.transforms using kernel.setup().
+            if getattr(self.kernel, "transforms", None) is None:
+                warmup_steps = 0
+                self.kernel.setup(warmup_steps, *args, **kwargs)
+            # Use `kernel.transforms` when available
+            if getattr(self.kernel, "transforms", None) is not None:
                 self.transforms = self.kernel.transforms
+            # Else, get transforms from model (e.g. in multiprocessing).
             elif self.kernel.model:
                 _, _, self.transforms, _ = initialize_model(self.kernel.model,
                                                             model_args=args,
-                                                            model_kwargs=kwargs)
+                                                            model_kwargs=kwargs,
+                                                            initial_params={})
+            # Assign default value
             else:
                 self.transforms = {}
 

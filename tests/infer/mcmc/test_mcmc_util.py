@@ -1,9 +1,16 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
+from functools import partial
+
 import pytest
 import torch
 
 import pyro
 import pyro.distributions as dist
 from pyro.infer import Predictive
+from pyro.infer.autoguide import (init_to_feasible, init_to_generated, init_to_mean, init_to_median, init_to_sample,
+                                  init_to_uniform, init_to_value)
 from pyro.infer.mcmc import NUTS
 from pyro.infer.mcmc.api import MCMC
 from pyro.infer.mcmc.util import initialize_model
@@ -51,3 +58,68 @@ def test_predictive(num_samples, parallel):
 
     # check sample mean
     assert_close(predictive_samples["obs"].reshape([-1, 5]).mean(0), true_probs, rtol=0.1)
+
+
+def model_with_param():
+    x = pyro.param("x", torch.tensor(1.))
+    pyro.sample("y", dist.Normal(x, 1))
+
+
+@pytest.mark.parametrize("jit_compile", [False, True])
+@pytest.mark.parametrize("num_chains", [1, 2])
+@pytest.mark.filterwarnings("ignore:num_chains")
+def test_model_with_param(jit_compile, num_chains):
+    kernel = NUTS(model_with_param, jit_compile=jit_compile, ignore_jit_warnings=True)
+    mcmc = MCMC(kernel, 10, num_chains=num_chains, mp_context="spawn")
+    mcmc.run()
+
+
+@pytest.mark.parametrize("subsample_size", [10, 5])
+def test_model_with_subsample(subsample_size):
+    size = 10
+
+    def model():
+        with pyro.plate("J", size, subsample_size=subsample_size):
+            pyro.sample("x", dist.Normal(0, 1))
+
+    kernel = NUTS(model)
+    mcmc = MCMC(kernel, 10)
+    if subsample_size < size:
+        with pytest.raises(RuntimeError, match="subsample"):
+            mcmc.run()
+    else:
+        mcmc.run()
+
+
+def test_init_to_value():
+    def model():
+        pyro.sample("x", dist.LogNormal(0, 1))
+
+    value = torch.randn(()).exp() * 10
+    kernel = NUTS(model, init_strategy=partial(init_to_value, values={"x": value}))
+    kernel.setup(warmup_steps=10)
+    assert_close(value, kernel.initial_params['x'].exp())
+
+
+@pytest.mark.parametrize("init_strategy", [
+    init_to_feasible,
+    init_to_mean,
+    init_to_median,
+    init_to_sample,
+    init_to_uniform,
+    init_to_value,
+    init_to_feasible(),
+    init_to_mean(),
+    init_to_median(num_samples=4),
+    init_to_sample(),
+    init_to_uniform(radius=0.1),
+    init_to_value(values={"x": torch.tensor(3.)}),
+    init_to_generated(
+        generate=lambda: init_to_value(values={"x": torch.rand(())})),
+], ids=str)
+def test_init_strategy_smoke(init_strategy):
+    def model():
+        pyro.sample("x", dist.LogNormal(0, 1))
+
+    kernel = NUTS(model, init_strategy=init_strategy)
+    kernel.setup(warmup_steps=10)

@@ -1,13 +1,20 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import torch
 from torch.distributions import constraints
 from torch.distributions.utils import broadcast_all, lazy_property
 
 from pyro.distributions import TorchDistribution, Poisson, NegativeBinomial
+from pyro.distributions.util import broadcast_shape
 
 
 class ZeroInflatedDistribution(TorchDistribution):
     """
-    Base class for a Zero Inflated distribution.
+    Generic Zero Inflated distribution.
+
+    This can be used directly or can be used as a base class as e.g. for
+    :class:`ZeroInflatedPoisson` and :class:`ZeroInflatedNegativeBinomial`.
 
     :param torch.Tensor gate: probability of extra zeros given via a Bernoulli distribution.
     :param TorchDistribution base_dist: the base distribution.
@@ -15,14 +22,20 @@ class ZeroInflatedDistribution(TorchDistribution):
     arg_constraints = {"gate": constraints.unit_interval}
 
     def __init__(self, gate, base_dist, validate_args=None):
-        self.gate = gate
-        self.base_dist = base_dist
-        batch_shape = self.gate.shape
+        if base_dist.event_shape:
+            raise ValueError("ZeroInflatedDistribution expected empty "
+                             "base_dist.event_shape but got {}"
+                             .format(base_dist.event_shape))
+        batch_shape = broadcast_shape(gate.shape, base_dist.batch_shape)
+        self.gate = gate.expand(batch_shape)
+        self.base_dist = base_dist.expand(batch_shape)
         event_shape = torch.Size()
 
-        super(ZeroInflatedDistribution, self).__init__(
-            batch_shape, event_shape, validate_args
-        )
+        super().__init__(batch_shape, event_shape, validate_args)
+
+    @property
+    def support(self):
+        return self.base_dist.support
 
     def log_prob(self, value):
         if self._validate_args:
@@ -68,14 +81,21 @@ class ZeroInflatedPoisson(ZeroInflatedDistribution):
     :param torch.Tensor gate: probability of extra zeros.
     :param torch.Tensor rate: rate of poisson distribution.
     """
+    arg_constraints = {"gate": constraints.unit_interval,
+                       "rate": constraints.positive}
     support = constraints.nonnegative_integer
 
     def __init__(self, gate, rate, validate_args=None):
-        base_dist = Poisson(rate=rate, validate_args=validate_args)
+        base_dist = Poisson(rate=rate, validate_args=False)
+        base_dist._validate_args = validate_args
 
-        super(ZeroInflatedPoisson, self).__init__(
+        super().__init__(
             gate, base_dist, validate_args=validate_args
         )
+
+    @property
+    def rate(self):
+        return self.base_dist.rate
 
 
 class ZeroInflatedNegativeBinomial(ZeroInflatedDistribution):
@@ -83,10 +103,15 @@ class ZeroInflatedNegativeBinomial(ZeroInflatedDistribution):
     A Zero Inflated Negative Binomial distribution.
 
     :param torch.Tensor gate: probability of extra zeros.
-    :param total_count (float or Tensor): non-negative number of negative Bernoulli trials
-    :param probs (Tensor): Event probabilities of success in the half open interval [0, 1)
-    :param logits (Tensor): Event log-odds for probabilities of success
+    :param total_count: non-negative number of negative Bernoulli trials.
+    :type total_count: float or torch.Tensor
+    :param torch.Tensor probs: Event probabilities of success in the half open interval [0, 1).
+    :param torch.Tensor logits: Event log-odds for probabilities of success.
     """
+    arg_constraints = {"gate": constraints.unit_interval,
+                       "total_count": constraints.greater_than_eq(0),
+                       "probs": constraints.half_open_interval(0., 1.),
+                       "logits": constraints.real}
     support = constraints.nonnegative_integer
 
     def __init__(self, gate, total_count, probs=None, logits=None, validate_args=None):
@@ -94,9 +119,22 @@ class ZeroInflatedNegativeBinomial(ZeroInflatedDistribution):
             total_count=total_count,
             probs=probs,
             logits=logits,
-            validate_args=validate_args,
+            validate_args=False,
         )
+        base_dist._validate_args = validate_args
 
-        super(ZeroInflatedNegativeBinomial, self).__init__(
+        super().__init__(
             gate, base_dist, validate_args=validate_args
         )
+
+    @property
+    def total_count(self):
+        return self.base_dist.total_count
+
+    @property
+    def probs(self):
+        return self.base_dist.probs
+
+    @property
+    def logits(self):
+        return self.base_dist.logits

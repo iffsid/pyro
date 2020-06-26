@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 
 import pytest
@@ -101,6 +104,42 @@ def test_add(shape, dim):
     assert_close((x + y).log_density(value), x.log_density(value) + y.log_density(value))
 
 
+@pytest.mark.parametrize("sample_shape", [(), (4,), (3, 2)], ids=str)
+@pytest.mark.parametrize("batch_shape", [(), (4,), (3, 2)], ids=str)
+@pytest.mark.parametrize("dim", [1, 2, 3])
+def test_rsample_shape(sample_shape, batch_shape, dim):
+    mvn = random_mvn(batch_shape, dim)
+    g = mvn_to_gaussian(mvn)
+    expected = mvn.rsample(sample_shape)
+    actual = g.rsample(sample_shape)
+    assert actual.dtype == expected.dtype
+    assert actual.shape == expected.shape
+
+
+@pytest.mark.parametrize("batch_shape", [(), (4,), (3, 2)], ids=str)
+@pytest.mark.parametrize("dim", [1, 2, 3])
+def test_rsample_distribution(batch_shape, dim):
+    num_samples = 20000
+    mvn = random_mvn(batch_shape, dim)
+    g = mvn_to_gaussian(mvn)
+    expected = mvn.rsample((num_samples,))
+    actual = g.rsample((num_samples,))
+
+    def get_moments(x):
+        mean = x.mean(0)
+        x = x - mean
+        cov = (x.unsqueeze(-1) * x.unsqueeze(-2)).mean(0)
+        std = cov.diagonal(dim1=-1, dim2=-2).sqrt()
+        corr = cov / (std.unsqueeze(-1) * std.unsqueeze(-2))
+        return mean, std, corr
+
+    expected_mean, expected_std, expected_corr = get_moments(expected)
+    actual_mean, actual_std, actual_corr = get_moments(actual)
+    assert_close(actual_mean, expected_mean, atol=0.1, rtol=0.02)
+    assert_close(actual_std, expected_std, atol=0.1, rtol=0.02)
+    assert_close(actual_corr, expected_corr, atol=0.05)
+
+
 @pytest.mark.parametrize("batch_shape", [(), (4,), (3, 2)], ids=str)
 @pytest.mark.parametrize("left", [1, 2, 3])
 @pytest.mark.parametrize("right", [1, 2, 3])
@@ -154,6 +193,14 @@ def test_condition(sample_shape, batch_shape, left, right):
     expected = gaussian.log_density(value)
     assert_close(actual, expected)
 
+    # test left_condition
+    permute_conditioned = gaussian.left_condition(left_value)
+    assert permute_conditioned.batch_shape == sample_shape + gaussian.batch_shape
+    assert permute_conditioned.dim() == right
+
+    permute_actual = permute_conditioned.log_density(right_value)
+    assert_close(permute_actual, expected)
+
 
 @pytest.mark.parametrize("batch_shape", [(), (4,), (3, 2)], ids=str)
 @pytest.mark.parametrize("dim", [1, 2, 3])
@@ -194,6 +241,18 @@ def test_affine_normal(batch_shape, x_dim, y_dim):
     assert_close(actual_like.log_normalizer, expected_like.log_normalizer)
     assert_close(actual_like.info_vec, expected_like.info_vec)
     assert_close(actual_like.precision, expected_like.precision)
+
+    x = torch.randn(batch_shape + (x_dim,))
+    permute_actual = actual.left_condition(x)
+    assert isinstance(permute_actual, AffineNormal)
+    permute_actual = permute_actual.to_gaussian()
+
+    permute_expected = expected.left_condition(y)
+    assert isinstance(permute_expected, Gaussian)
+
+    assert_close(permute_actual.log_normalizer, permute_actual.log_normalizer)
+    assert_close(permute_actual.info_vec, permute_actual.info_vec)
+    assert_close(permute_actual.precision, permute_actual.precision)
 
 
 @pytest.mark.parametrize("sample_shape", [(), (7,), (6, 5)], ids=str)

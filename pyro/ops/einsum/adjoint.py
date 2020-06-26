@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import weakref
 from abc import ABCMeta, abstractmethod
 
@@ -136,7 +139,7 @@ def unflatten(flat_sample, output_dims, contract_dims, contract_shape):
         slices = [None] * len(contract_dims)
         for i, size in reversed(list(enumerate(contract_shape))):
             slices[i] = sample % size
-            sample = sample / size
+            sample = sample // size
         sample = torch.cat(slices)
     sample._pyro_dims = SAMPLE_SYMBOL + output_dims
     sample._pyro_sample_dims = contract_dims

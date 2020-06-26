@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 from pyro.optim.optim import PyroOptim
 
 
@@ -20,7 +23,7 @@ class PyroLRScheduler(PyroOptim):
         for i in range(epochs):
             for minibatch in DataLoader(dataset, batch_size):
                 svi.step(minibatch)
-            scheduler.step(epoch=i)
+            scheduler.step()
     """
     def __init__(self, scheduler_constructor, optim_args, clip_args=None):
         # pytorch scheduler
@@ -30,19 +33,19 @@ class PyroLRScheduler(PyroOptim):
         # kwargs for the torch optimizer
         optim_kwargs = optim_args.pop('optim_args')
         self.kwargs = optim_args
-        super(PyroLRScheduler, self).__init__(pt_optim_constructor, optim_kwargs, clip_args)
+        super().__init__(pt_optim_constructor, optim_kwargs, clip_args)
 
     def __call__(self, params, *args, **kwargs):
-        super(PyroLRScheduler, self).__call__(params, *args, **kwargs)
+        super().__call__(params, *args, **kwargs)
 
     def _get_optim(self, params):
-        optim = super(PyroLRScheduler, self)._get_optim(params)
+        optim = super()._get_optim(params)
         return self.pt_scheduler_constructor(optim, **self.kwargs)
 
     def step(self, *args, **kwargs):
         """
         Takes the same arguments as the PyTorch scheduler
-        (optional ``epoch`` kwarg or ``loss`` in for ``ReduceLROnPlateau``)
+        (e.g. optional ``loss`` for ``ReduceLROnPlateau``)
         """
         for scheduler in self.optim_objs.values():
             scheduler.step(*args, **kwargs)

@@ -1,22 +1,11 @@
 Primitives
 ==========
 
-.. autofunction:: pyro.sample
-.. autofunction:: pyro.param
-.. autofunction:: pyro.module
-.. autofunction:: pyro.random_module
-.. autofunction:: pyro.factor
-
-.. autoclass:: pyro.plate
+.. automodule:: pyro.primitives
     :members:
     :undoc-members:
+    :show-inheritance:
+    :member-order: bysource
 
-.. autofunction:: pyro.get_param_store
-.. autofunction:: pyro.clear_param_store
-
-.. autofunction:: pyro.validation_enabled
-.. autofunction:: pyro.enable_validation
 
 .. autofunction:: pyro.ops.jit.trace
-
-.. autofunction:: pyro.set_rng_seed

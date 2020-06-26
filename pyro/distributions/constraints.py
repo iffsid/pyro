@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 from torch.distributions.constraints import *  # noqa F403
 from torch.distributions.constraints import Constraint
 from torch.distributions.constraints import __all__ as torch_constraints
@@ -12,7 +15,7 @@ class IndependentConstraint(Constraint):
     independent entries are valid.
 
     :param torch.distributions.constraints.Constraint base_constraint: A base
-        constraint whose entries are incidentally indepenent.
+        constraint whose entries are incidentally independent.
     :param int reinterpreted_batch_ndims: The number of extra event dimensions that will
         be considered dependent.
     """
@@ -25,6 +28,18 @@ class IndependentConstraint(Constraint):
         result = result.reshape(result.shape[:result.dim() - self.reinterpreted_batch_ndims] + (-1,))
         result = result.min(-1)[0]
         return result
+
+
+# TODO move this upstream to torch.distributions
+class _Integer(Constraint):
+    """
+    Constrain to integers.
+    """
+    def check(self, value):
+        return value % 1 == 0
+
+    def __repr__(self):
+        return self.__class__.__name__[1:]
 
 
 class _CorrCholesky(Constraint):
@@ -40,10 +55,12 @@ class _CorrCholesky(Constraint):
 
 
 corr_cholesky_constraint = _CorrCholesky()
+integer = _Integer()
 
 __all__ = [
     'IndependentConstraint',
     'corr_cholesky_constraint',
+    'integer',
 ]
 
 __all__.extend(torch_constraints)

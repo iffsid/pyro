@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 """
 An example to use Pyro Gaussian Process module to classify MNIST and binary MNIST.
 
@@ -41,7 +44,7 @@ from pyro.contrib.examples.util import get_data_loader, get_data_directory
 
 class CNN(nn.Module):
     def __init__(self):
-        super(CNN, self).__init__()
+        super().__init__()
         self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
         self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
         self.fc1 = nn.Linear(320, 50)
@@ -87,7 +90,7 @@ def test(args, test_loader, gpmodule):
         f_loc, f_var = gpmodule(data)
         # use its likelihood to give prediction class
         pred = gpmodule.likelihood(f_loc, f_var)
-        # compare prediction and target to count accuaracy
+        # compare prediction and target to count accuracy
         correct += pred.eq(target).long().cpu().sum().item()
 
     print("\nTest set: Accuracy: {}/{} ({:.2f}%)\n"
@@ -162,7 +165,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    assert pyro.__version__.startswith('1.0.0')
+    assert pyro.__version__.startswith('1.3.1')
     parser = argparse.ArgumentParser(description='Pyro GP MNIST Example')
     parser.add_argument('--data-dir', type=str, default=None, metavar='PATH',
                         help='default directory to cache MNIST data')

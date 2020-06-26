@@ -6,6 +6,13 @@ MCMC
     :undoc-members:
     :show-inheritance:
 
+MCMCKernel
+----------
+.. autoclass:: pyro.infer.mcmc.mcmc_kernel.MCMCKernel
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 HMC
 ---
 
@@ -18,6 +25,14 @@ NUTS
 ----
 
 .. autoclass:: pyro.infer.mcmc.NUTS
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
+BlockMassMatrix
+---------------
+
+.. autoclass:: pyro.infer.mcmc.BlockMassMatrix
     :members:
     :undoc-members:
     :show-inheritance:

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import torch
 
 from pyro.distributions.rejector import Rejector
@@ -23,7 +26,8 @@ class RejectionStandardGamma(Rejector):
         # Compute log scale using Gamma.log_prob().
         x = self._d.detach()  # just an arbitrary x.
         log_scale = self.propose_log_prob(x) + self.log_prob_accept(x) - self.log_prob(x)
-        super(RejectionStandardGamma, self).__init__(self.propose, self.log_prob_accept, log_scale)
+        super().__init__(self.propose, self.log_prob_accept, log_scale,
+                         batch_shape=concentration.shape, event_shape=())
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RejectionStandardGamma, _instance)
@@ -35,7 +39,8 @@ class RejectionStandardGamma(Rejector):
         # Compute log scale using Gamma.log_prob().
         x = new._d.detach()  # just an arbitrary x.
         log_scale = new.propose_log_prob(x) + new.log_prob_accept(x) - new.log_prob(x)
-        super(RejectionStandardGamma, new).__init__(new.propose, new.log_prob_accept, log_scale)
+        super(RejectionStandardGamma, new).__init__(new.propose, new.log_prob_accept, log_scale,
+                                                    batch_shape=batch_shape, event_shape=())
         new._validate_args = self._validate_args
         return new
 
@@ -77,13 +82,13 @@ class RejectionGamma(Gamma):
     has_rsample = True
 
     def __init__(self, concentration, rate, validate_args=None):
-        super(RejectionGamma, self).__init__(concentration, rate, validate_args=validate_args)
+        super().__init__(concentration, rate, validate_args=validate_args)
         self._standard_gamma = RejectionStandardGamma(concentration)
         self.rate = rate
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(RejectionGamma, _instance)
-        new = super(RejectionGamma, self).expand(batch_shape, new)
+        new = super().expand(batch_shape, new)
         new._standard_gamma = self._standard_gamma.expand(batch_shape)
         new._validate_args = self._validate_args
         return new
@@ -111,7 +116,7 @@ class ShapeAugmentedGamma(Gamma):
     def __init__(self, concentration, rate, boost=1, validate_args=None):
         if concentration.min() + boost < 1:
             raise ValueError('Need to boost at least once for concentration < 1')
-        super(ShapeAugmentedGamma, self).__init__(concentration, rate, validate_args=validate_args)
+        super().__init__(concentration, rate, validate_args=validate_args)
         self.concentration = concentration
         self._boost = boost
         self._rejection_gamma = RejectionGamma(concentration + boost, rate)
@@ -119,7 +124,7 @@ class ShapeAugmentedGamma(Gamma):
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ShapeAugmentedGamma, _instance)
-        new = super(ShapeAugmentedGamma, self).expand(batch_shape, new)
+        new = super().expand(batch_shape, new)
         batch_shape = torch.Size(batch_shape)
         new.concentration = self.concentration.expand(batch_shape)
         new._boost = self._boost
@@ -155,12 +160,12 @@ class ShapeAugmentedDirichlet(Dirichlet):
     have higher variance than PyTorch's ``Dirichlet`` implementation.
     """
     def __init__(self, concentration, boost=1, validate_args=None):
-        super(ShapeAugmentedDirichlet, self).__init__(concentration, validate_args=validate_args)
+        super().__init__(concentration, validate_args=validate_args)
         self._gamma = ShapeAugmentedGamma(concentration, torch.ones_like(concentration), boost)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ShapeAugmentedDirichlet, _instance)
-        new = super(ShapeAugmentedDirichlet, self).expand(batch_shape, new)
+        new = super().expand(batch_shape, new)
         batch_shape = torch.Size(batch_shape)
         new._gamma = self._gamma.expand(batch_shape + self._gamma.concentration.shape[-1:])
         new._validate_args = self._validate_args
@@ -180,13 +185,13 @@ class ShapeAugmentedBeta(Beta):
     have higher variance than PyTorch's ``rate`` implementation.
     """
     def __init__(self, concentration1, concentration0, boost=1, validate_args=None):
-        super(ShapeAugmentedBeta, self).__init__(concentration1, concentration0, validate_args=validate_args)
+        super().__init__(concentration1, concentration0, validate_args=validate_args)
         alpha_beta = torch.stack([concentration1, concentration0], -1)
         self._gamma = ShapeAugmentedGamma(alpha_beta, torch.ones_like(alpha_beta), boost)
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(ShapeAugmentedBeta, _instance)
-        new = super(ShapeAugmentedBeta, self).expand(batch_shape, new)
+        new = super().expand(batch_shape, new)
         batch_shape = torch.Size(batch_shape)
         new._gamma = self._gamma.expand(batch_shape + self._gamma.concentration.shape[-1:])
         new._validate_args = self._validate_args

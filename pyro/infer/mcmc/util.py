@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import functools
 import warnings
 from collections import OrderedDict, defaultdict
@@ -11,9 +14,9 @@ from opt_einsum import shared_intermediates
 
 import pyro
 import pyro.poutine as poutine
-import pyro.distributions as dist
 from pyro.distributions.util import broadcast_shape, logsumexp
 from pyro.infer import config_enumerate
+from pyro.infer.autoguide.initialization import InitMessenger, init_to_uniform
 from pyro.infer.util import is_validation_enabled
 from pyro.ops import stats
 from pyro.ops.contract import contract_to_tensor
@@ -23,7 +26,7 @@ from pyro.poutine.util import prune_subsample_sites
 from pyro.util import check_site_shape, ignore_jit_warnings
 
 
-class TraceTreeEvaluator(object):
+class TraceTreeEvaluator:
     """
     Computes the log probability density of a trace (of a model with
     tree structure) that possibly contains discrete sample sites
@@ -147,7 +150,7 @@ class TraceTreeEvaluator(object):
             return self._aggregate_log_probs(ordinal=frozenset()).sum()
 
 
-class TraceEinsumEvaluator(object):
+class TraceEinsumEvaluator:
     """
     Computes the log probability density of a trace (of a model with
     tree structure) that possibly contains discrete sample sites
@@ -242,7 +245,7 @@ def _guess_max_plate_nesting(model, args, kwargs):
     return max_plate_nesting
 
 
-class _PEMaker(object):
+class _PEMaker:
     def __init__(self, model, model_args, model_kwargs, trace_prob_evaluator, transforms):
         self.model = model
         self.model_args = model_args
@@ -271,6 +274,12 @@ class _PEMaker(object):
             return self._compiled_fn(*vals)
 
         with pyro.validation_enabled(False):
+            tmp = []
+            for _, v in pyro.get_param_store().named_parameters():
+                if v.requires_grad:
+                    v.requires_grad_(False)
+                    tmp.append(v)
+
             def _pe_jit(*zi):
                 params = dict(zip(names, zi))
                 return self._potential_fn(params)
@@ -278,7 +287,11 @@ class _PEMaker(object):
             if skip_jit_warnings:
                 _pe_jit = ignore_jit_warnings()(_pe_jit)
             self._compiled_fn = torch.jit.trace(_pe_jit, vals, **jit_options)
-            return self._compiled_fn(*vals)
+
+            result = self._compiled_fn(*vals)
+            for v in tmp:
+                v.requires_grad_(True)
+            return result
 
     def get_potential_fn(self, jit_compile=False, skip_jit_warnings=True, jit_options=None):
         if jit_compile:
@@ -287,41 +300,41 @@ class _PEMaker(object):
         return self._potential_fn
 
 
-# TODO: expose init_strategy using separate functions.
-def _get_init_params(model, model_args, model_kwargs, transforms, potential_fn, prototype_params,
-                     max_tries_initial_params=100, num_chains=1, strategy="uniform"):
+def _find_valid_initial_params(model, model_args, model_kwargs, transforms, potential_fn,
+                               prototype_params, max_tries_initial_params=100, num_chains=1,
+                               init_strategy=init_to_uniform, trace=None):
     params = prototype_params
-    params_per_chain = defaultdict(list)
-    n = 0
 
     # For empty models, exit early
     if not params:
         return params
 
-    for i in range(max_tries_initial_params):
-        while n < num_chains:
-            if strategy == "uniform":
-                params = {k: dist.Uniform(v.new_full(v.shape, -2), v.new_full(v.shape, 2)).sample()
-                          for k, v in params.items()}
-            elif strategy == "prior":
-                trace = poutine.trace(model).get_trace(*model_args, **model_kwargs)
-                samples = {name: trace.nodes[name]["value"].detach() for name in params}
-                params = {k: transforms[k](v) for k, v in samples.items()}
-            pe_grad, pe = potential_grad(potential_fn, params)
+    params_per_chain = defaultdict(list)
+    num_found = 0
+    model = InitMessenger(init_strategy)(model)
+    for attempt in range(num_chains * max_tries_initial_params):
+        if trace is None:
+            trace = poutine.trace(model).get_trace(*model_args, **model_kwargs)
+        samples = {name: trace.nodes[name]["value"].detach() for name in params}
+        params = {k: transforms[k](v) for k, v in samples.items()}
+        pe_grad, pe = potential_grad(potential_fn, params)
 
-            if torch.isfinite(pe) and all(map(torch.all, map(torch.isfinite, pe_grad.values()))):
-                for k, v in params.items():
-                    params_per_chain[k].append(v)
-                n += 1
-        if num_chains == 1:
-            return {k: v[0] for k, v in params_per_chain.items()}
-        else:
-            return {k: torch.stack(v) for k, v in params_per_chain.items()}
+        if torch.isfinite(pe) and all(map(torch.all, map(torch.isfinite, pe_grad.values()))):
+            for k, v in params.items():
+                params_per_chain[k].append(v)
+            num_found += 1
+            if num_found == num_chains:
+                if num_chains == 1:
+                    return {k: v[0] for k, v in params_per_chain.items()}
+                else:
+                    return {k: torch.stack(v) for k, v in params_per_chain.items()}
+        trace = None
     raise ValueError("Model specification seems incorrect - cannot find valid initial params.")
 
 
 def initialize_model(model, model_args=(), model_kwargs={}, transforms=None, max_plate_nesting=None,
-                     jit_compile=False, jit_options=None, skip_jit_warnings=False, num_chains=1):
+                     jit_compile=False, jit_options=None, skip_jit_warnings=False, num_chains=1,
+                     init_strategy=init_to_uniform, initial_params=None):
     """
     Given a Python callable with Pyro primitives, generates the following model-specific
     properties needed for inference using HMC/NUTS kernels:
@@ -352,6 +365,10 @@ def initialize_model(model, model_args=(), model_kwargs={}, transforms=None, max
         tracer when ``jit_compile=True``. Default is False.
     :param int num_chains: Number of parallel chains. If `num_chains > 1`,
         the returned `initial_params` will be a list with `num_chains` elements.
+    :param callable init_strategy: A per-site initialization function.
+        See :ref:`autoguide-initialization` section for available functions.
+    :param dict initial_params: dict containing initial tensors in unconstrained
+        space to initiate the markov chain.
     :returns: a tuple of (`initial_params`, `potential_fn`, `transforms`, `prototype_trace`)
     """
     # XXX `transforms` domains are sites' supports
@@ -367,11 +384,15 @@ def initialize_model(model, model_args=(), model_kwargs={}, transforms=None, max
     # No-op if model does not have any discrete latents.
     model = poutine.enum(config_enumerate(model),
                          first_available_dim=-1 - max_plate_nesting)
-    model_trace = poutine.trace(model).get_trace(*model_args, **model_kwargs)
+    prototype_model = poutine.trace(InitMessenger(init_strategy)(model))
+    model_trace = prototype_model.get_trace(*model_args, **model_kwargs)
     has_enumerable_sites = False
     prototype_samples = {}
     for name, node in model_trace.iter_stochastic_nodes():
-        if isinstance(node["fn"], _Subsample):
+        fn = node["fn"]
+        if isinstance(fn, _Subsample):
+            if fn.subsample_size is not None and fn.subsample_size < fn.size:
+                raise NotImplementedError("HMC/NUTS does not support model with subsample sites.")
             continue
         if node["fn"].has_enumerate_support:
             has_enumerable_sites = True
@@ -386,16 +407,20 @@ def initialize_model(model, model_args=(), model_kwargs={}, transforms=None, max
     trace_prob_evaluator = TraceEinsumEvaluator(model_trace,
                                                 has_enumerable_sites,
                                                 max_plate_nesting)
-    prototype_params = {k: transforms[k](v) for k, v in prototype_samples.items()}
 
     pe_maker = _PEMaker(model, model_args, model_kwargs, trace_prob_evaluator, transforms)
 
-    # Note that we deliberately do not exercise jit compilation here so as to
-    # enable potential_fn to be picklable (a torch._C.Function cannot be pickled).
-    init_params = _get_init_params(model, model_args, model_kwargs, transforms,
-                                   pe_maker.get_potential_fn(), prototype_params, num_chains=num_chains)
+    if initial_params is None:
+        prototype_params = {k: transforms[k](v) for k, v in prototype_samples.items()}
+        # Note that we deliberately do not exercise jit compilation here so as to
+        # enable potential_fn to be picklable (a torch._C.Function cannot be pickled).
+        # We pass model_trace merely for computational savings.
+        initial_params = _find_valid_initial_params(model, model_args, model_kwargs, transforms,
+                                                    pe_maker.get_potential_fn(), prototype_params,
+                                                    num_chains=num_chains, init_strategy=init_strategy,
+                                                    trace=model_trace)
     potential_fn = pe_maker.get_potential_fn(jit_compile, skip_jit_warnings, jit_options)
-    return init_params, potential_fn, transforms, model_trace
+    return initial_params, potential_fn, transforms, model_trace
 
 
 def _safe(fn):

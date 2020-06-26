@@ -1,3 +1,5 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
 
 _VALIDATION_ENABLED = False
 
@@ -16,6 +18,13 @@ def site_is_subsample(site):
     Determines whether a trace site originated from a subsample statement inside an `plate`.
     """
     return site["type"] == "sample" and type(site["fn"]).__name__ == "_Subsample"
+
+
+def site_is_factor(site):
+    """
+    Determines whether a trace site originated from a factor statement.
+    """
+    return site["type"] == "sample" and type(site["fn"]).__name__ == "Unit"
 
 
 def prune_subsample_sites(trace):

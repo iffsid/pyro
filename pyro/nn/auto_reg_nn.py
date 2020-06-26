@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import warnings
 
 import torch
@@ -54,7 +57,7 @@ def create_mask(input_dim, context_dim, hidden_dims, permutation, output_dim_mul
     # For conditional MADE, introduce a 0 index that all the conditioned variables are connected to
     # as per Paige and Wood (2016) (see below)
     if context_dim > 0:
-        hidden_indices = [sample_mask_indices(input_dim, h)-1 for h in hidden_dims]
+        hidden_indices = [sample_mask_indices(input_dim, h) - 1 for h in hidden_dims]
     else:
         hidden_indices = [sample_mask_indices(input_dim - 1, h) for h in hidden_dims]
 
@@ -89,7 +92,7 @@ class MaskedLinear(nn.Linear):
     """
 
     def __init__(self, in_features, out_features, mask, bias=True):
-        super(MaskedLinear, self).__init__(in_features, out_features, bias)
+        super().__init__(in_features, out_features, bias)
         self.register_buffer('mask', mask.data)
 
     def forward(self, _input):
@@ -155,7 +158,7 @@ class ConditionalAutoRegressiveNN(nn.Module):
             permutation=None,
             skip_connections=False,
             nonlinearity=nn.ReLU()):
-        super(ConditionalAutoRegressiveNN, self).__init__()
+        super().__init__()
         if input_dim == 1:
             warnings.warn('ConditionalAutoRegressiveNN input_dim = 1. Consider using an affine transformation instead.')
         self.input_dim = input_dim
@@ -179,10 +182,11 @@ class ConditionalAutoRegressiveNN(nn.Module):
 
         if permutation is None:
             # By default set a random permutation of variables, which is important for performance with multiple steps
-            self.permutation = torch.randperm(input_dim, device='cpu').to(torch.Tensor().device)
+            P = torch.randperm(input_dim, device='cpu').to(torch.Tensor().device)
         else:
             # The permutation is chosen by the user
-            self.permutation = permutation.type(dtype=torch.int64)
+            P = permutation.type(dtype=torch.int64)
+        self.register_buffer('permutation', P)
 
         # Create masks
         self.masks, self.mask_skip = create_mask(
@@ -216,10 +220,15 @@ class ConditionalAutoRegressiveNN(nn.Module):
         """
         return self.permutation
 
-    def forward(self, x, context):
+    def forward(self, x, context=None):
         """
         The forward method
         """
+        # We must be able to broadcast the size of the context over the input
+        if context is None:
+            context = self.context
+
+        context = context.expand(x.size()[:-1] + (context.size(-1),))
         x = torch.cat([context, x], dim=-1)
         return self._forward(x)
 

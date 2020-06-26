@@ -1,8 +1,11 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import torch
 
 from pyro.distributions.distribution import Distribution
 from pyro.poutine.util import is_validation_enabled
-from pyro.util import ignore_jit_warnings, jit_compatible_arange
+from pyro.util import ignore_jit_warnings
 
 from .indep_messenger import CondIndepStackFrame, IndepMessenger
 from .runtime import apply_stack
@@ -44,10 +47,9 @@ class _Subsample(Distribution):
             raise NotImplementedError
         subsample_size = self.subsample_size
         if subsample_size is None or subsample_size >= self.size:
-            result = jit_compatible_arange(self.size, device=self.device)
+            result = torch.arange(self.size, device=self.device)
         else:
-            result = torch.multinomial(torch.ones(self.size), self.subsample_size,
-                                       replacement=False).to(self.device)
+            result = torch.randperm(self.size, device=self.device)[:subsample_size].clone()
         return result.cuda() if self.use_cuda else result
 
     def log_prob(self, x):
@@ -64,7 +66,7 @@ class SubsampleMessenger(IndepMessenger):
 
     def __init__(self, name, size=None, subsample_size=None, subsample=None, dim=None,
                  use_cuda=None, device=None):
-        super(SubsampleMessenger, self).__init__(name, size, dim, device)
+        super().__init__(name, size, dim, device)
         self.subsample_size = subsample_size
         self._indices = subsample
         self.use_cuda = use_cuda
@@ -84,7 +86,7 @@ class SubsampleMessenger(IndepMessenger):
             assert subsample is None
             size = -1  # This is PyTorch convention for "arbitrary size"
             subsample_size = -1
-        elif subsample is None:
+        else:
             msg = {
                 "type": "sample",
                 "name": name,
@@ -92,7 +94,7 @@ class SubsampleMessenger(IndepMessenger):
                 "is_observed": False,
                 "args": (),
                 "kwargs": {},
-                "value": None,
+                "value": subsample,
                 "infer": {},
                 "scale": 1.0,
                 "mask": None,
@@ -117,10 +119,11 @@ class SubsampleMessenger(IndepMessenger):
 
     def _reset(self):
         self._indices = None
-        super(SubsampleMessenger, self)._reset()
+        super()._reset()
 
     def _process_message(self, msg):
         frame = CondIndepStackFrame(self.name, self.dim, self.subsample_size, self.counter)
+        frame.full_size = self.size  # Used for param initialization.
         msg["cond_indep_stack"] = (frame,) + msg["cond_indep_stack"]
         if isinstance(self.size, torch.Tensor) or isinstance(self.subsample_size, torch.Tensor):
             if not isinstance(msg["scale"], torch.Tensor):
@@ -129,7 +132,7 @@ class SubsampleMessenger(IndepMessenger):
         msg["scale"] = msg["scale"] * self.size / self.subsample_size
 
     def _postprocess_message(self, msg):
-        if msg["type"] == "param" and self.dim is not None:
+        if msg["type"] in ("param", "subsample") and self.dim is not None:
             event_dim = msg["kwargs"].get("event_dim")
             if event_dim is not None:
                 assert event_dim >= 0
@@ -137,10 +140,26 @@ class SubsampleMessenger(IndepMessenger):
                 shape = msg["value"].shape
                 if len(shape) >= -dim and shape[dim] != 1:
                     if is_validation_enabled() and shape[dim] != self.size:
+                        if msg["type"] == "param":
+                            statement = "pyro.param({}, ..., event_dim={})".format(msg["name"], event_dim)
+                        else:
+                            statement = "pyro.subsample(..., event_dim={})".format(event_dim)
                         raise ValueError(
-                            "Inside pyro.plate({}, {}, dim={}) "
-                            "invalid shape of pyro.param({}, ..., event_dim={}): {}"
-                            .format(self.name, self.size, self.dim, msg["name"], event_dim, shape))
+                            "Inside pyro.plate({}, {}, dim={}) invalid shape of {}: {}"
+                            .format(self.name, self.size, self.dim, statement, shape))
                     # Subsample parameters with known batch semantics.
                     if self.subsample_size < self.size:
-                        msg["value"] = msg["value"].index_select(dim, self._indices)
+                        value = msg["value"]
+                        new_value = value.index_select(dim, self._indices)
+                        if msg["type"] == "param":
+                            if hasattr(value, "_pyro_unconstrained_param"):
+                                param = value._pyro_unconstrained_param
+                            else:
+                                param = value.unconstrained()
+
+                            if not hasattr(param, "_pyro_subsample"):
+                                param._pyro_subsample = {}
+
+                            param._pyro_subsample[dim] = self._indices
+                            new_value._pyro_unconstrained_param = param
+                        msg["value"] = new_value

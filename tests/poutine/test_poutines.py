@@ -1,4 +1,8 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import functools
+import io
 import logging
 import pickle
 import warnings
@@ -276,7 +280,7 @@ class QueueHandlerDiscreteTest(TestCase):
 
 class Model(nn.Module):
     def __init__(self):
-        super(Model, self).__init__()
+        super().__init__()
         self.fc = nn.Linear(2, 1)
 
     def forward(self, x):
@@ -710,6 +714,19 @@ def test_replay_enumerate_poutine(depth, first_available_dim):
         assert actual_shape == expected_shape, 'error on iteration {}'.format(i)
 
 
+@pytest.mark.parametrize("has_rsample", [False, True])
+@pytest.mark.parametrize("depth", [0, 1, 2])
+def test_plate_preserves_has_rsample(has_rsample, depth):
+    def guide():
+        loc = pyro.param("loc", torch.tensor(0.))
+        with pyro.plate_stack("plates", (2,) * depth):
+            return pyro.sample("x", dist.Normal(loc, 1).has_rsample_(has_rsample))
+
+    x = guide()
+    assert x.dim() == depth
+    assert x.requires_grad == has_rsample
+
+
 def test_plate_error_on_enter():
     def model():
         with pyro.plate('foo', 0):
@@ -774,7 +791,7 @@ def test_decorator_interface_queue():
 
 def test_method_decorator_interface_condition():
 
-    class cls_model(object):
+    class cls_model:
 
         @poutine.condition(data={"b": torch.tensor(1.)})
         def model(self, p):
@@ -836,8 +853,11 @@ def _model(a=torch.tensor(1.), b=torch.tensor(1.)):
 ])
 def test_pickling(wrapper):
     wrapped = wrapper(_model)
+    buffer = io.BytesIO()
     # default protocol cannot serialize torch.Size objects (see https://github.com/pytorch/pytorch/issues/20823)
-    deserialized = pickle.loads(pickle.dumps(wrapped, protocol=pickle.HIGHEST_PROTOCOL))
+    torch.save(wrapped, buffer, pickle_protocol=pickle.HIGHEST_PROTOCOL)
+    buffer.seek(0)
+    deserialized = torch.load(buffer)
     obs = torch.tensor(0.5)
     pyro.set_rng_seed(0)
     actual_trace = poutine.trace(deserialized).get_trace(obs)
@@ -846,3 +866,19 @@ def test_pickling(wrapper):
     assert tuple(actual_trace) == tuple(expected_trace.nodes)
     assert_close([actual_trace.nodes[site]['value'] for site in actual_trace.stochastic_nodes],
                  [expected_trace.nodes[site]['value'] for site in expected_trace.stochastic_nodes])
+
+
+def test_arg_kwarg_error():
+
+    def model():
+        pyro.param("p", torch.zeros(1, requires_grad=True))
+        pyro.sample("a", Bernoulli(torch.tensor([0.5])),
+                    infer={"enumerate": "parallel"})
+        pyro.sample("b", Bernoulli(torch.tensor([0.5])))
+
+    with pytest.raises(ValueError, match="not callable"):
+        with poutine.mask(False):
+            model()
+
+    with poutine.mask(mask=False):
+        model()

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import copy
 import warnings
 from collections import OrderedDict
@@ -78,7 +81,7 @@ def sample(name, fn, *args, **kwargs):
     # check if stack is empty
     # if stack empty, default behavior (defined here)
     if not am_i_wrapped():
-        if obs is not None:
+        if obs is not None and not infer.get("_deterministic"):
             warnings.warn("trying to observe a value outside of inference at " + name,
                           RuntimeWarning)
             return obs
@@ -122,6 +125,62 @@ def factor(name, log_factor):
     unit_dist = dist.Unit(log_factor)
     unit_value = unit_dist.sample()
     sample(name, unit_dist, obs=unit_value)
+
+
+def deterministic(name, value, event_dim=None):
+    """
+    EXPERIMENTAL Deterministic statement to add a :class:`~pyro.distributions.Delta`
+    site with name `name` and value `value` to the trace. This is useful when
+    we want to record values which are completely determined by their parents.
+    For example::
+
+        x = sample("x", dist.Normal(0, 1))
+        x2 = deterministic("x2", x ** 2)
+
+    .. note:: The site does not affect the model density. This currently converts
+        to a :func:`sample` statement, but may change in the future.
+
+    :param str name: Name of the site.
+    :param torch.Tensor value: Value of the site.
+    :param int event_dim: Optional event dimension, defaults to `value.ndim`.
+    """
+    event_dim = value.ndim if event_dim is None else event_dim
+    return sample(name, dist.Delta(value, event_dim=event_dim).mask(False),
+                  obs=value, infer={"_deterministic": True})
+
+
+@effectful(type="subsample")
+def subsample(data, event_dim):
+    """
+    EXPERIMENTAL Subsampling statement to subsample data based on enclosing
+    :class:`~pyro.primitives.plate` s.
+
+    This is typically called on arguments to ``model()`` when subsampling is
+    performed automatically by :class:`~pyro.primitives.plate` s by passing
+    either the ``subsample`` or ``subsample_size`` kwarg. For example the
+    following are equivalent::
+
+        # Version 1. using pyro.subsample()
+        def model(data):
+            with pyro.plate("data", len(data), subsample_size=10, dim=-data.dim()) as ind:
+                data = data[ind]
+                # ...
+
+        # Version 2. using indexing
+        def model(data):
+            with pyro.plate("data", len(data), subsample_size=10, dim=-data.dim()):
+                data = pyro.subsample(data, event_dim=0)
+                # ...
+
+    :param data: A tensor of batched data.
+    :type data: ~torch.Tensor
+    :param int event_dim: The event dimension of the data tensor. Dimensions to
+        the left are considered batch dimensions.
+    :returns: A subsampled version of ``data``
+    :rtype: ~torch.Tensor
+    """
+    assert isinstance(event_dim, int) and event_dim >= 0
+    return data  # May be intercepted by SubsampleMessenger.
 
 
 class plate(PlateMessenger):
@@ -234,13 +293,13 @@ class plate(PlateMessenger):
 class iarange(plate):
     def __init__(self, *args, **kwargs):
         warnings.warn("pyro.iarange is deprecated; use pyro.plate instead", DeprecationWarning)
-        super(iarange, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class irange(SubsampleMessenger):
     def __init__(self, *args, **kwargs):
         warnings.warn("pyro.irange is deprecated; use pyro.plate instead", DeprecationWarning)
-        super(irange, self).__init__(*args, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 @contextmanager
@@ -324,7 +383,7 @@ def random_module(name, nn_module, prior, *args, **kwargs):
     r"""
     .. warning::
         The `random_module` primitive is deprecated, and will be removed
-        in a future release. Use :class:`~pyro.nn.PyroModule` instead to
+        in a future release. Use :class:`~pyro.nn.module.PyroModule` instead to
         to create Bayesian modules from :class:`torch.nn.Module` instances.
         See the `Bayesian Regression tutorial <http://pyro.ai/examples/bayesian_regression.html>`_
         for an example.

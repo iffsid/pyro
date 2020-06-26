@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import os
 import subprocess
 import sys
@@ -44,7 +47,7 @@ with open(os.path.join(PROJECT_PATH, 'pyro', '_version.py'), 'w') as f:
 try:
     long_description = open('README.md', encoding='utf-8').read()
 except Exception as e:
-    sys.stderr.write('Failed to read README.md\n'.format(e))
+    sys.stderr.write('Failed to read README.md: {}\n'.format(e))
     sys.stderr.flush()
     long_description = ''
 
@@ -55,9 +58,9 @@ long_description = '\n'.join([str(line) for line in long_description.split('\n')
 # examples/tutorials
 EXTRAS_REQUIRE = [
     'jupyter>=1.0.0',
+    'graphviz>=0.8',
     'matplotlib>=1.3',
-    'pillow',
-    'torchvision>=0.4.0',
+    'torchvision>=0.6.0',
     'visdom>=0.1.4',
     'pandas',
     'seaborn',
@@ -78,19 +81,18 @@ setup(
     install_requires=[
         # if you add any additional libraries, please also
         # add them to `docs/requirements.txt`
-        'graphviz>=0.8',
         # numpy is necessary for some functionality of PyTorch
         'numpy>=1.7',
         'opt_einsum>=2.3.2',
         'pyro-api>=0.1.1',
-        'torch>=1.3.0',
+        'torch>=1.5.0',
         'tqdm>=4.36',
     ],
     extras_require={
         'extras': EXTRAS_REQUIRE,
         'test': EXTRAS_REQUIRE + [
             'nbval',
-            'pytest>=4.1',
+            'pytest>=5.0',
             'pytest-cov',
             'scipy>=1.1',
         ],
@@ -104,7 +106,7 @@ setup(
             'nbval',
             'ninja',
             'pypandoc',
-            'pytest>=4.1',
+            'pytest>=5.0',
             'pytest-xdist',
             'scipy>=1.1',
             'sphinx',
@@ -114,7 +116,7 @@ setup(
     },
     python_requires='>=3.5',
     keywords='machine learning statistics probabilistic programming bayesian modeling pytorch',
-    license='MIT License',
+    license='Apache 2.0',
     classifiers=[
         'Intended Audience :: Developers',
         'Intended Audience :: Education',

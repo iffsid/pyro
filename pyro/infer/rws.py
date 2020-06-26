@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 
 import torch
@@ -83,10 +86,10 @@ class ReweightedWakeSleep(ELBO):
         assert(num_particles > 1), \
             "Reweighted Wake Sleep needs to be run with more than one particle"
 
-        super(ReweightedWakeSleep, self).__init__(num_particles=num_particles,
-                                                  max_plate_nesting=max_plate_nesting,
-                                                  vectorize_particles=vectorize_particles,
-                                                  strict_enumeration_warning=strict_enumeration_warning)
+        super().__init__(num_particles=num_particles,
+                         max_plate_nesting=max_plate_nesting,
+                         vectorize_particles=vectorize_particles,
+                         strict_enumeration_warning=strict_enumeration_warning)
         self.insomnia = insomnia
         self.model_has_params = model_has_params
         self.num_sleep_particles = num_particles if num_sleep_particles is None else num_sleep_particles
@@ -94,18 +97,17 @@ class ReweightedWakeSleep(ELBO):
         assert(insomnia >= 0 and insomnia <= 1), \
             "insomnia should be in [0, 1]"
 
-    def _get_trace(self, model, guide, *args, **kwargs):
+    def _get_trace(self, model, guide, args, kwargs):
         """
         Returns a single trace from the guide, and the model that is run against it.
         """
         model_trace, guide_trace = get_importance_trace("flat", self.max_plate_nesting,
-                                                        model, guide, detach=True,
-                                                        *args, **kwargs)
+                                                        model, guide, args, kwargs, detach=True)
         if is_validation_enabled():
             check_if_enumerated(guide_trace)
         return model_trace, guide_trace
 
-    def _loss(self, model, guide, *args, **kwargs):
+    def _loss(self, model, guide, args, kwargs):
         """
         :returns: returns model loss and guide loss
         :rtype: float, float
@@ -121,7 +123,7 @@ class ReweightedWakeSleep(ELBO):
             log_joints = []
             log_qs = []
 
-            for model_trace, guide_trace in self._get_traces(model, guide, *args, **kwargs):
+            for model_trace, guide_trace in self._get_traces(model, guide, args, kwargs):
                 log_joint = 0.
                 log_q = 0.
 
@@ -167,14 +169,14 @@ class ReweightedWakeSleep(ELBO):
 
             if self.vectorize_particles:
                 if self.max_plate_nesting == float('inf'):
-                    self._guess_max_plate_nesting(_model, _guide, *args, **kwargs)
+                    self._guess_max_plate_nesting(_model, _guide, args, kwargs)
                 _model = self._vectorized_num_sleep_particles(_model)
                 _guide = self._vectorized_num_sleep_particles(guide)
 
             for _ in range(1 if self.vectorize_particles else self.num_sleep_particles):
                 _model_trace = poutine.trace(_model).get_trace(*args, **kwargs)
                 _model_trace.detach_()
-                _guide_trace = self._get_matched_trace(_model_trace, _guide, *args, **kwargs)
+                _guide_trace = self._get_matched_trace(_model_trace, _guide, args, kwargs)
                 _log_q += _guide_trace.log_prob_sum()
 
             sleep_phi_loss = -_log_q / self.num_sleep_particles
@@ -196,7 +198,7 @@ class ReweightedWakeSleep(ELBO):
           guide (insomnia * wake-phi + (1 - insomnia) * sleep-phi).
         """
         with torch.no_grad():
-            wake_theta_loss, phi_loss = self._loss(model, guide, *args, **kwargs)
+            wake_theta_loss, phi_loss = self._loss(model, guide, args, kwargs)
 
         return wake_theta_loss, phi_loss
 
@@ -208,7 +210,7 @@ class ReweightedWakeSleep(ELBO):
         Computes the RWS estimators for the model (wake-theta) and the guide (wake-phi).
         Performs backward as appropriate on both, using num_particle many samples/particles.
         """
-        wake_theta_loss, phi_loss = self._loss(model, guide, *args, **kwargs)
+        wake_theta_loss, phi_loss = self._loss(model, guide, args, kwargs)
         # convenience addition to ensure easier gradients without requiring `retain_graph=True`
         (wake_theta_loss + phi_loss).backward()
 
@@ -227,7 +229,7 @@ class ReweightedWakeSleep(ELBO):
         return wrapped_fn
 
     @staticmethod
-    def _get_matched_trace(model_trace, guide, *args, **kwargs):
+    def _get_matched_trace(model_trace, guide, args, kwargs):
         kwargs["observations"] = {}
         for node in model_trace.stochastic_nodes + model_trace.observation_nodes:
             if "was_observed" in model_trace.nodes[node]["infer"]:

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import torch
 from torch.optim.optimizer import Optimizer
 
@@ -30,7 +33,7 @@ class AdagradRMSProp(Optimizer):
 
     def __init__(self, params, eta=1.0, delta=1.0e-16, t=0.1):
         defaults = dict(eta=eta, delta=delta, t=t)
-        super(AdagradRMSProp, self).__init__(params, defaults)
+        super().__init__(params, defaults)
 
         for group in self.param_groups:
             for p in group['params']:
@@ -75,6 +78,6 @@ class AdagradRMSProp(Optimizer):
 
                 lr = group['eta'] * (state['step'] ** (-0.5 + group['delta']))
                 std = state['sum'].sqrt()
-                p.data.addcdiv_(-lr, grad, 1.0 + std)
+                p.data.addcdiv_(grad, 1.0 + std, value=-lr)
 
         return loss

@@ -1,3 +1,6 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import math
 
 import numpy as np
@@ -10,7 +13,7 @@ SINGLE_TEST_DATUM_IDX = [0]
 BATCH_TEST_DATA_IDX = [-1]
 
 
-class Fixture(object):
+class Fixture:
     def __init__(self,
                  pyro_dist=None,
                  scipy_dist=None,
@@ -71,7 +74,7 @@ class Fixture(object):
     def _convert_logits_to_ps(self, dist_params):
         if 'logits' in dist_params:
             logits = torch.tensor(dist_params.pop('logits'))
-            is_multidimensional = self.get_test_distribution_name() != 'Bernoulli'
+            is_multidimensional = self.get_test_distribution_name() not in ['Bernoulli', 'Geometric']
             probs = logits_to_probs(logits, is_binary=not is_multidimensional)
             dist_params['probs'] = list(probs.detach().cpu().numpy())
         return dist_params

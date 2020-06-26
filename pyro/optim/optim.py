@@ -1,13 +1,17 @@
+# Copyright (c) 2017-2019 Uber Technologies, Inc.
+# SPDX-License-Identifier: Apache-2.0
+
 import torch
 from torch.nn.utils import clip_grad_norm_, clip_grad_value_
 
 import pyro
 from pyro.optim.adagrad_rmsprop import AdagradRMSProp as pt_AdagradRMSProp
 from pyro.optim.clipped_adam import ClippedAdam as pt_ClippedAdam
+from pyro.optim.dct_adam import DCTAdam as pt_DCTAdam
 from pyro.params import module_from_param_with_module_name, user_param_name
 
 
-class PyroOptim(object):
+class PyroOptim:
     """
     A wrapper for torch.optim.Optimizer objects that helps with managing dynamically generated parameters.
 
@@ -185,3 +189,10 @@ def ClippedAdam(optim_args):
     Wraps :class:`pyro.optim.clipped_adam.ClippedAdam` with :class:`~pyro.optim.optim.PyroOptim`.
     """
     return PyroOptim(pt_ClippedAdam, optim_args)
+
+
+def DCTAdam(optim_args):
+    """
+    Wraps :class:`pyro.optim.dct_adam.DCTAdam` with :class:`~pyro.optim.optim.PyroOptim`.
+    """
+    return PyroOptim(pt_DCTAdam, optim_args)
