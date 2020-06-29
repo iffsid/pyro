@@ -9,7 +9,7 @@ import pyro
 import pyro.poutine as poutine
 from pyro.infer.elbo import ELBO
 from pyro.infer.enum import get_importance_trace
-from pyro.infer.util import is_validation_enabled
+from pyro.infer.util import get_dependent_plate_dims, is_validation_enabled, torch_sum
 from pyro.poutine.util import prune_subsample_sites
 from pyro.util import check_if_enumerated, check_model_guide_match, warn_if_nan
 
@@ -126,21 +126,16 @@ class ReweightedWakeSleep(ELBO):
             for model_trace, guide_trace in self._get_traces(model, guide, args, kwargs):
                 log_joint = 0.
                 log_q = 0.
+                sum_dims = get_dependent_plate_dims(model_trace.nodes.values())
 
                 for _, site in model_trace.nodes.items():
                     if site["type"] == "sample":
-                        if self.vectorize_particles:
-                            log_p_site = site["log_prob"].reshape(self.num_particles, -1).sum(-1)
-                        else:
-                            log_p_site = site["log_prob_sum"]
+                        log_p_site = torch_sum(site["log_prob"], sum_dims)
                         log_joint = log_joint + log_p_site
 
                 for _, site in guide_trace.nodes.items():
                     if site["type"] == "sample":
-                        if self.vectorize_particles:
-                            log_q_site = site["log_prob"].reshape(self.num_particles, -1).sum(-1)
-                        else:
-                            log_q_site = site["log_prob_sum"]
+                        log_q_site = torch_sum(site["log_prob"], sum_dims)
                         log_q = log_q + log_q_site
 
                 log_joints.append(log_joint)
