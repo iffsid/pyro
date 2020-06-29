@@ -32,7 +32,9 @@ from pyro.distributions.transforms.permute import Permute, permute
 from pyro.distributions.transforms.planar import ConditionalPlanar, Planar, conditional_planar, planar
 from pyro.distributions.transforms.polynomial import Polynomial, polynomial
 from pyro.distributions.transforms.radial import ConditionalRadial, Radial, conditional_radial, radial
+from pyro.distributions.transforms.spline_autoregressive import SplineAutoregressive, spline_autoregressive
 from pyro.distributions.transforms.spline import ConditionalSpline, Spline, conditional_spline, spline
+from pyro.distributions.transforms.spline_coupling import SplineCoupling, spline_coupling
 from pyro.distributions.transforms.sylvester import Sylvester, sylvester
 
 ########################################
@@ -92,6 +94,8 @@ __all__ = [
     'Polynomial',
     'Radial',
     'Spline',
+    'SplineAutoregressive',
+    'SplineCoupling',
     'Sylvester',
     'affine_autoregressive',
     'affine_coupling',
@@ -115,7 +119,9 @@ __all__ = [
     'polynomial',
     'radial',
     'spline',
-    'sylvester'
+    'spline_autoregressive',
+    'spline_coupling',
+    'sylvester',
 ]
 
 __all__.extend(torch_transforms)
